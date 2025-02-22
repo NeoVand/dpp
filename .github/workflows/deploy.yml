@@ -32,7 +32,9 @@ jobs:
           node-version: '20'
 
       - name: Install Dependencies
-        run: npm ci
+        run: |
+          npm ci
+          npm install @mui/material @emotion/react @emotion/styled @mui/icons-material
 
       - name: Build
         run: npm run build
