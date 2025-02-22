@@ -2,6 +2,12 @@
 
 A beautiful and interactive demonstration of potential field-based path planning using React, TypeScript, and Vite! Watch as a vehicle navigates through obstacles using artificial potential fields to find its way to the goal.
 
+🎮 **[Try the Live Demo](https://neovand.github.io/dpp/)**
+
+## 📸 Screenshot
+
+![Path Planner Demo](./screenshot.jpg)
+
 ## ✨ Features
 
 - 🎯 Interactive start position and heading setting
