@@ -1,5 +1,8 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import {
+  Accordion,
+  AccordionDetails,
+  AccordionSummary,
   Box,
   Button,
   Container,
@@ -9,21 +12,29 @@ import {
   ThemeProvider,
   createTheme,
   Stack,
-  Alert,
-  Divider,
   Checkbox,
   IconButton,
   useMediaQuery,
-  CssBaseline
+  CssBaseline,
+  FormControlLabel,
+  Select,
+  MenuItem,
+  InputLabel,
+  FormControl
 } from '@mui/material'
 import {
   PlayArrow,
   Stop,
-  GpsFixed,
-  Check,
   Speed as SpeedIcon,
   Brightness4,
-  Brightness7
+  Brightness7,
+  ExpandMore,
+  Settings as SettingsIcon,
+  Animation as AnimationIcon,
+  GridOn as GridIcon,
+  Science as ScienceIcon,
+  Route as PathIcon,
+  Refresh as RefreshIcon
 } from '@mui/icons-material'
 import './App.css'
 
@@ -61,40 +72,110 @@ interface SimulationPath {
   completed: boolean;
 }
 
+interface DragState {
+  type: 'car' | 'goal' | 'rotation' | null;
+  initialX: number;
+  initialY: number;
+  initialAngle?: number;
+  centerX?: number;
+  centerY?: number;
+  lastUpdate?: number;
+}
+
+// Add path parameters interface
+interface PathParameters {
+  gridSize: number;
+  maxSteps: number;
+  minPathLength: number;
+  significantDistance: number;
+  numAnglesPerPoint: number;
+  marginScale: number;
+}
+
+// Update the WorldInitialization interface
+interface WorldInitialization {
+  method: 'random' | 'uniform' | 'custom';
+  numObstacles: number;
+  seed: number;
+  minRadius: number;
+  maxRadius: number;
+}
+
 function App() {
   const prefersDarkMode = useMediaQuery('(prefers-color-scheme: dark)')
   const [mode, setMode] = useState<'light' | 'dark'>(prefersDarkMode ? 'dark' : 'light')
+
+  // Update the initial state
+  const [worldInit, setWorldInit] = useState<WorldInitialization>({
+    method: 'random',
+    numObstacles: 10,
+    seed: Math.floor(Math.random() * 1000000),
+    minRadius: 15,
+    maxRadius: 35
+  })
+
+  // Add path parameters state
+  const [pathParams, setPathParams] = useState<PathParameters>({
+    gridSize: 35,
+    maxSteps: 2000,
+    minPathLength: 10,
+    significantDistance: 50,
+    numAnglesPerPoint: 1,
+    marginScale: 0.2
+  })
+  
+  // Add auto-update paths state
+  const [autoUpdatePaths, setAutoUpdatePaths] = useState(true)
+
+  // Helper function to check if a point is within a circle
+  const isPointInCircle = (px: number, py: number, cx: number, cy: number, radius: number) => {
+    const dx = px - cx
+    const dy = py - cy
+    return dx * dx + dy * dy <= radius * radius
+  }
+
+  // Helper function to get canvas coordinates
+  const getCanvasCoordinates = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
+    const canvas = canvasRef.current
+    if (!canvas) return null
+
+    const rect = canvas.getBoundingClientRect()
+    const dpr = window.devicePixelRatio || 1
+    const x = (e.clientX - rect.left) * (canvas.width / rect.width / dpr)
+    const y = (e.clientY - rect.top) * (canvas.height / rect.height / dpr)
+    return { x, y }
+  }, [])
 
   const theme = createTheme({
     palette: {
       mode,
       primary: {
-        main: mode === 'dark' ? '#94a3b8' : '#475569', // Slate-400 : Slate-600
-        light: mode === 'dark' ? '#cbd5e1' : '#94a3b8', // Slate-300 : Slate-400
-        dark: mode === 'dark' ? '#64748b' : '#334155', // Slate-500 : Slate-700
+        main: mode === 'dark' ? '#94a3b8' : '#475569',
+        light: mode === 'dark' ? '#cbd5e1' : '#94a3b8',
+        dark: mode === 'dark' ? '#64748b' : '#334155',
       },
       secondary: {
-        main: mode === 'dark' ? '#93c5fd' : '#3b82f6', // Blue-300 : Blue-500
-        light: mode === 'dark' ? '#bfdbfe' : '#60a5fa', // Blue-200 : Blue-400
-        dark: mode === 'dark' ? '#60a5fa' : '#2563eb', // Blue-400 : Blue-600
+        main: mode === 'dark' ? '#93c5fd' : '#3b82f6',
+        light: mode === 'dark' ? '#bfdbfe' : '#60a5fa',
+        dark: mode === 'dark' ? '#60a5fa' : '#2563eb',
       },
       success: {
-        main: mode === 'dark' ? '#86efac' : '#22c55e', // Green-300 : Green-500
-        light: mode === 'dark' ? '#bbf7d0' : '#4ade80', // Green-200 : Green-400
-        dark: mode === 'dark' ? '#4ade80' : '#16a34a', // Green-400 : Green-600
+        main: mode === 'dark' ? '#86efac' : '#22c55e',
+        light: mode === 'dark' ? '#bbf7d0' : '#4ade80',
+        dark: mode === 'dark' ? '#4ade80' : '#16a34a',
       },
       error: {
-        main: mode === 'dark' ? '#fca5a5' : '#ef4444', // Red-300 : Red-500
-        light: mode === 'dark' ? '#fecaca' : '#f87171', // Red-200 : Red-400
-        dark: mode === 'dark' ? '#f87171' : '#dc2626', // Red-400 : Red-600
+        main: mode === 'dark' ? '#fca5a5' : '#ef4444',
+        light: mode === 'dark' ? '#fecaca' : '#f87171',
+        dark: mode === 'dark' ? '#f87171' : '#dc2626',
       },
       background: {
-        default: mode === 'dark' ? '#0f172a' : '#f8fafc', // Slate-900 : Slate-50
-        paper: mode === 'dark' ? '#1e293b' : '#ffffff', // Slate-800 : White
+        default: mode === 'dark' ? '#0f172a' : '#f8fafc',
+        paper: mode === 'dark' ? '#1e293b' : '#ffffff',
       },
       text: {
-        primary: mode === 'dark' ? '#f8fafc' : '#0f172a', // Slate-50 : Slate-900
-        secondary: mode === 'dark' ? '#cbd5e1' : '#475569', // Slate-300 : Slate-600
+        primary: mode === 'dark' ? '#f8fafc' : '#0f172a',
+        secondary: mode === 'dark' ? '#cbd5e1' : '#475569',
       },
     },
     components: {
@@ -105,40 +186,180 @@ function App() {
           },
         },
       },
+      MuiAccordion: {
+        styleOverrides: {
+          root: {
+            '&:before': {
+              display: 'none',
+            },
+            boxShadow: 'none',
+            borderRadius: '8px',
+            '&:first-of-type': {
+              borderRadius: '8px',
+            },
+            '&:last-of-type': {
+              borderRadius: '8px',
+            },
+          },
+        },
+      },
+      MuiAccordionSummary: {
+        styleOverrides: {
+          root: {
+            minHeight: 48,
+            '&.Mui-expanded': {
+              minHeight: 48,
+            },
+          },
+          content: {
+            margin: '8px 0',
+            '&.Mui-expanded': {
+              margin: '8px 0',
+            },
+          },
+        },
+      },
+      MuiAccordionDetails: {
+        styleOverrides: {
+          root: {
+            padding: '8px 16px 16px',
+          },
+        },
+      },
+      MuiSlider: {
+        styleOverrides: {
+          root: {
+            padding: '8px 0',
+          },
+          thumb: {
+            width: 16,
+            height: 16,
+          },
+          track: {
+            height: 4,
+          },
+          rail: {
+            height: 4,
+          },
+        },
+      },
+      MuiButton: {
+        styleOverrides: {
+          root: {
+            textTransform: 'none',
+            padding: '6px 16px',
+          },
+        },
+      },
+      MuiTypography: {
+        styleOverrides: {
+          root: {
+            fontSize: '0.875rem',
+          },
+          h6: {
+            fontSize: '1rem',
+          },
+          subtitle1: {
+            fontSize: '0.875rem',
+          },
+          subtitle2: {
+            fontSize: '0.8125rem',
+          },
+          body1: {
+            fontSize: '0.875rem',
+          },
+          body2: {
+            fontSize: '0.8125rem',
+          },
+        },
+      },
     },
   })
 
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const carRef = useRef<Car>({ x: 50, y: 50, angle: 0, velocity: 0 })
-  const [obstacles] = useState<Obstacle[]>(() => generateRandomObstacles())
-  const [goal] = useState({ x: 750, y: 550 })
+  const [obstacles, setObstacles] = useState<Obstacle[]>(() => generateRandomObstacles(worldInit))
+  const [goal, setGoal] = useState({ x: 750, y: 550 })
   const animationFrameRef = useRef<number | undefined>(undefined)
   const [isRunning, setIsRunning] = useState(false)
   const [speed, setSpeed] = useState(2)
   const [hasReachedGoal, setHasReachedGoal] = useState(false)
-  const [isSettingStart, setIsSettingStart] = useState(true)
-  const isDraggingRef = useRef(false)
-  const [showField, setShowField] = useState(true)
+  const [showField, setShowField] = useState(false)
   const [goalWeight, setGoalWeight] = useState(0.5)
   const [obstacleWeight, setObstacleWeight] = useState(3000.0)
-  const fieldResolution = 7 // Reduced from 10 to increase resolution
   const [arrowScale, setArrowScale] = useState(1.0)
+  const [arrowThickness, setArrowThickness] = useState(1.5)
+  const [arrowheadSize, setArrowheadSize] = useState(1.0)
   const [showFieldMagnitude, setShowFieldMagnitude] = useState(false)
-  const [showPaths, setShowPaths] = useState(false)
+  const [showPaths, setShowPaths] = useState(true)
   const [paths, setPaths] = useState<SimulationPath[]>([])
   const [isCalculatingPaths, setIsCalculatingPaths] = useState(false)
-  const [randomizeHeading, setRandomizeHeading] = useState(false)
+  const [randomizeHeading, setRandomizeHeading] = useState(true)
   const [showCarPath, setShowCarPath] = useState(false)
+  const [selectedObject, setSelectedObject] = useState<'car' | 'goal' | null>(null)
+  const dragStateRef = useRef<DragState>({ type: null, initialX: 0, initialY: 0 })
 
-  function generateRandomObstacles(): Obstacle[] {
+  // Update the generateRandomObstacles function
+  function generateRandomObstacles(params: WorldInitialization): Obstacle[] {
     const obstacles: Obstacle[] = []
-    for (let i = 0; i < 10; i++) {
-      obstacles.push({
-        x: Math.random() * 700 + 50,
-        y: Math.random() * 500 + 50,
-        radius: Math.random() * 20 + 15
+    const canvas = canvasRef.current
+    if (!canvas) return obstacles
+
+    const rect = canvas.getBoundingClientRect()
+    const margin = 50 // Minimum distance from edges
+    const width = rect.width - 2 * margin
+    const height = rect.height - 2 * margin
+
+    // Use seeded random number generator
+    const random = (() => {
+      let seed = params.seed
+      return () => {
+        seed = (seed * 16807) % 2147483647
+        return (seed - 1) / 2147483646
+      }
+    })()
+
+    // Helper function to check if a new obstacle overlaps with existing ones
+    const isValidPosition = (x: number, y: number, radius: number) => {
+      // Check distance from edges
+      if (x - radius < margin || x + radius > rect.width - margin ||
+          y - radius < margin || y + radius > rect.height - margin) {
+        return false
+      }
+
+      // Check overlap with existing obstacles (with minimum spacing)
+      const spacing = 10 // Minimum space between obstacles
+      return !obstacles.some(obs => {
+        const dx = obs.x - x
+        const dy = obs.y - y
+        const minDist = obs.radius + radius + spacing
+        return dx * dx + dy * dy < minDist * minDist
       })
     }
+
+    // Try to place obstacles with maximum attempts
+    const maxAttempts = 100
+    for (let i = 0; i < params.numObstacles; i++) {
+      let placed = false
+      let attempts = 0
+
+      while (!placed && attempts < maxAttempts) {
+        const radius = params.minRadius + random() * (params.maxRadius - params.minRadius)
+        const x = margin + random() * width
+        const y = margin + random() * height
+
+        if (isValidPosition(x, y, radius)) {
+          obstacles.push({ x, y, radius })
+          placed = true
+        }
+        attempts++
+      }
+
+      if (!placed) {
+        console.warn(`Could not place obstacle ${i + 1} after ${maxAttempts} attempts`)
+      }
+    }
+
     return obstacles
   }
 
@@ -164,49 +385,35 @@ function App() {
     let totalForce: Force = { x: 0, y: 0 };
     
     // Calculate attractive force (F_att = -k_att * (q - q_goal))
-    const distToGoal = Math.sqrt(
-      Math.pow(goal.x - position.x, 2) + Math.pow(goal.y - position.y, 2)
-    );
+    const dx = position.x - goal.x;
+    const dy = position.y - goal.y;
+    const distToGoal = Math.sqrt(dx * dx + dy * dy);
     
     // Attractive force - linear for better behavior at long distances
-    const F_att: Force = {
-      x: -goalWeight * (position.x - goal.x) / distToGoal,
-      y: -goalWeight * (position.y - goal.y) / distToGoal
-    };
-    
-    // Add attractive force to total
-    totalForce.x += F_att.x;
-    totalForce.y += F_att.y;
+    totalForce.x = -goalWeight * dx / Math.max(distToGoal, 0.1);
+    totalForce.y = -goalWeight * dy / Math.max(distToGoal, 0.1);
     
     // Calculate repulsive forces from all obstacles
     obstacles.forEach(obstacle => {
-      // Calculate ρ(q) - distance to obstacle surface
       const dx = position.x - obstacle.x;
       const dy = position.y - obstacle.y;
       const distToCenter = Math.sqrt(dx * dx + dy * dy);
       const rho = Math.max(0.1, distToCenter - obstacle.radius); // Distance to surface
-      
-      // Define influence distance ρ_0
       const rho_0 = obstacle.radius * 4;
       
       // Only apply repulsive force if within influence distance
       if (rho <= rho_0) {
-        // Calculate unit vector pointing away from obstacle
-        const dirX = dx / distToCenter;
-        const dirY = dy / distToCenter;
-        
-        // Calculate repulsive force magnitude using the correct formula
-        // F_rep = k_rep * (1/ρ - 1/ρ_0) * (1/ρ^2) * ∇ρ
+        // Calculate repulsive force magnitude
         const magnitude = obstacleWeight * (1/rho - 1/rho_0) / (rho * rho);
         
         // Add repulsive force to total
-        totalForce.x += magnitude * dirX;
-        totalForce.y += magnitude * dirY;
+        totalForce.x += magnitude * dx / distToCenter;
+        totalForce.y += magnitude * dy / distToCenter;
       }
     });
     
     return totalForce;
-  }, [obstacles, goal, goalWeight, obstacleWeight])
+  }, [obstacles, goal, goalWeight, obstacleWeight]);
 
   const drawPotentialField = useCallback((ctx: CanvasRenderingContext2D) => {
     if (!showField) return;
@@ -217,7 +424,7 @@ function App() {
     const scaleX = canvas.width / rect.width;
     const scaleY = canvas.height / rect.height;
     
-    const visualResolution = fieldResolution;
+    const visualResolution = pathParams.gridSize;
     
     for (let y = visualResolution; y < canvas.height - visualResolution; y += visualResolution) {
       for (let x = visualResolution; x < canvas.width - visualResolution; x += visualResolution) {
@@ -232,7 +439,7 @@ function App() {
         // Skip drawing arrows where force is very small
         if (magnitude < 0.01) continue;
         
-        // Normalize and scale the force vector (smaller arrows for denser field)
+        // Normalize and scale the force vector (only affects length)
         const baseArrowLength = visualResolution * 0.8;
         const maxArrowLength = baseArrowLength * arrowScale;
         const scale = Math.min(maxArrowLength / magnitude, maxArrowLength);
@@ -247,42 +454,39 @@ function App() {
         ctx.rotate(angle);
         
         // Set arrow color based on magnitude
-        const alpha = 0.8; // Increased from 0.7 for better visibility
+        const alpha = 0.8;
         
         if (showFieldMagnitude) {
-          // Single color with intensity based on magnitude
-          const color = mode === 'dark' ? '147, 197, 253' : '59, 130, 246'; // Blue-200 : Blue-500
+          const color = mode === 'dark' ? '147, 197, 253' : '59, 130, 246';
           ctx.fillStyle = `rgba(${color}, ${alpha})`;
           ctx.strokeStyle = ctx.fillStyle;
         } else {
-          // Direction-based coloring with better contrast
           const absX = Math.abs(force.x);
           const absY = Math.abs(force.y);
           const total = absX + absY;
           if (mode === 'dark') {
-            // Dark mode: brighter, more saturated colors
-            const r = Math.floor(252 * (absY / total)); // Red-200
-            const b = Math.floor(252 * (absX / total)); // Blue-200
+            const r = Math.floor(252 * (absY / total));
+            const b = Math.floor(252 * (absX / total));
             ctx.fillStyle = `rgba(${r}, 165, ${b}, ${alpha})`;
           } else {
-            // Light mode: deeper, richer colors
-            const r = Math.floor(220 * (absY / total)); // Red-600
-            const b = Math.floor(220 * (absX / total)); // Blue-600
+            const r = Math.floor(220 * (absY / total));
+            const b = Math.floor(220 * (absX / total));
             ctx.fillStyle = `rgba(${r}, 40, ${b}, ${alpha})`;
           }
           ctx.strokeStyle = ctx.fillStyle;
         }
         
-        // Draw arrow line
+        // Draw arrow line with fixed thickness
         ctx.beginPath();
         ctx.moveTo(0, 0);
         ctx.lineTo(arrowLength, 0);
-        ctx.lineWidth = 1.5; // Increased from 1 for better visibility
+        ctx.lineWidth = arrowThickness;
         ctx.stroke();
         
-        // Draw arrow head
-        const headLength = Math.min(6 * arrowScale, arrowLength * 0.3);
-        const headWidth = headLength * 0.5;
+        // Draw arrow head with configurable size
+        const baseHeadLength = 6;
+        const headLength = baseHeadLength * arrowheadSize;
+        const headWidth = headLength * 0.8;
         ctx.beginPath();
         ctx.moveTo(arrowLength, 0);
         ctx.lineTo(arrowLength - headLength, headWidth);
@@ -293,7 +497,7 @@ function App() {
         ctx.restore();
       }
     }
-  }, [calculatePotentialField, showField, fieldResolution, obstacles, obstacleWeight, arrowScale, showFieldMagnitude, mode])
+  }, [calculatePotentialField, showField, pathParams.gridSize, obstacles, obstacleWeight, arrowScale, arrowThickness, arrowheadSize, showFieldMagnitude, mode]);
 
   const drawPaths = useCallback((ctx: CanvasRenderingContext2D) => {
     if (!showPaths) return;
@@ -323,74 +527,205 @@ function App() {
     });
   }, [paths, showPaths, mode]);
 
+  const calculatePaths = useCallback(async () => {
+    setIsCalculatingPaths(true);
+    const newPaths: SimulationPath[] = [];
+    const {
+      gridSize,
+      maxSteps,
+      minPathLength,
+      significantDistance,
+      numAnglesPerPoint,
+      marginScale
+    } = pathParams;
+    
+    // Get actual canvas dimensions
+    const canvas = canvasRef.current;
+    if (!canvas) {
+      setIsCalculatingPaths(false);
+      return;
+    }
+    
+    const rect = canvas.getBoundingClientRect();
+    const canvasWidth = rect.width;
+    const canvasHeight = rect.height;
+    const margin = Math.max(canvasWidth, canvasHeight) * marginScale;
+
+    // Focus on important areas: near car, near goal, and some grid points
+    const startPoints: Array<{x: number, y: number}> = [];
+    const car = carRef.current;
+    
+    // Add points around car and goal
+    [{ x: car.x, y: car.y }, { x: goal.x, y: goal.y }].forEach(center => {
+      for (let r = 0; r <= gridSize * 4; r += gridSize) {
+        const angleStep = r === 0 ? Math.PI * 2 : Math.PI / 4;
+        for (let angle = 0; angle < Math.PI * 2; angle += angleStep) {
+          const x = center.x + r * Math.cos(angle);
+          const y = center.y + r * Math.sin(angle);
+          
+          // Skip if too close to obstacles
+          const tooClose = obstacles.some(obs => {
+            const dx = x - obs.x;
+            const dy = y - obs.y;
+            return dx * dx + dy * dy < (obs.radius + 5) * (obs.radius + 5);
+          });
+          
+          if (!tooClose) {
+            startPoints.push({ x, y });
+          }
+        }
+      }
+    });
+    
+    // Add sparse grid points
+    const gridStep = gridSize * 2;
+    for (let x = 0; x < canvasWidth; x += gridStep) {
+      for (let y = 0; y < canvasHeight; y += gridStep) {
+        const tooClose = obstacles.some(obs => {
+          const dx = x - obs.x;
+          const dy = y - obs.y;
+          return dx * dx + dy * dy < (obs.radius + 5) * (obs.radius + 5);
+        });
+        
+        if (!tooClose) {
+          startPoints.push({ x, y });
+        }
+      }
+    }
+
+    // Process paths
+    const processPath = (startX: number, startY: number, initialAngle: number) => {
+      const path: PathPoint[] = [];
+      let x = startX;
+      let y = startY;
+      let angle = initialAngle;
+      let completed = false;
+      let stuckCounter = 0;
+      
+      for (let step = 0; step < maxSteps; step++) {
+        path.push({ x, y });
+        
+        const distToGoal = Math.hypot(goal.x - x, goal.y - y);
+        if (distToGoal < 15) {
+          completed = true;
+          break;
+        }
+        
+        const force = calculatePotentialField({ x, y });
+        const targetAngle = Math.atan2(force.y, force.x);
+        const angleDiff = ((targetAngle - angle + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
+        angle += Math.sign(angleDiff) * Math.min(Math.abs(angleDiff), 0.08);
+        
+        const newX = x + Math.cos(angle) * 2;
+        const newY = y + Math.sin(angle) * 2;
+        
+        if (Math.abs(newX - x) < 0.1 && Math.abs(newY - y) < 0.1) {
+          if (++stuckCounter > 5) break;
+        } else {
+          stuckCounter = 0;
+        }
+        
+        // Quick bounds and obstacle check
+        if (newX < -margin || newX > canvasWidth + margin || 
+            newY < -margin || newY > canvasHeight + margin ||
+            obstacles.some(obs => {
+              const dx = newX - obs.x;
+              const dy = newY - obs.y;
+              return dx * dx + dy * dy < obs.radius * obs.radius;
+            })) {
+          break;
+        }
+        
+        x = newX;
+        y = newY;
+      }
+      
+      const distanceTraveled = path.length > 1 ? 
+        Math.hypot(path[path.length-1].x - path[0].x, path[path.length-1].y - path[0].y) : 0;
+      
+      if (path.length > minPathLength && (completed || distanceTraveled > significantDistance)) {
+        newPaths.push({ points: path, completed });
+      }
+    };
+
+    // Process all start points
+    startPoints.forEach(point => {
+      if (randomizeHeading) {
+        processPath(point.x, point.y, Math.random() * Math.PI * 2);
+      } else {
+        const baseAngle = Math.atan2(goal.y - point.y, goal.x - point.x);
+        for (let i = 0; i < numAnglesPerPoint; i++) {
+          processPath(point.x, point.y, baseAngle + (i * Math.PI / numAnglesPerPoint));
+        }
+      }
+    });
+
+    setPaths(newPaths);
+    setShowPaths(true);
+    setIsCalculatingPaths(false);
+  }, [calculatePotentialField, obstacles, goal, randomizeHeading, pathParams]);
+
+  // Update the auto-update paths effect
+  useEffect(() => {
+    if (autoUpdatePaths && !isRunning && !isCalculatingPaths) {
+      calculatePaths();
+    }
+  }, [autoUpdatePaths, calculatePaths, goal, carRef.current.x, carRef.current.y, isRunning, isCalculatingPaths]);
+
+  // Add the calculateSinglePath function before the draw function
   const calculateSinglePath = useCallback((startX: number, startY: number, startAngle: number): PathPoint[] => {
     const path: PathPoint[] = [];
     let x = startX;
     let y = startY;
     let angle = startAngle;
-    const maxSteps = 2000; // Increased to match calculatePaths
+    let stuckCounter = 0;
     
-    // Get canvas dimensions for bounds checking
     const canvas = canvasRef.current;
     if (!canvas) return path;
     
     const rect = canvas.getBoundingClientRect();
     const canvasWidth = rect.width;
     const canvasHeight = rect.height;
-    const margin = Math.max(canvasWidth, canvasHeight) * 0.2; // Same margin as calculatePaths
+    const margin = Math.max(canvasWidth, canvasHeight) * pathParams.marginScale;
     
-    let stuckCounter = 0;
-    let lastX = x;
-    let lastY = y;
-    
-    for (let step = 0; step < maxSteps; step++) {
+    for (let step = 0; step < pathParams.maxSteps; step++) {
       path.push({ x, y });
       
-      if (Math.sqrt(Math.pow(goal.x - x, 2) + Math.pow(goal.y - y, 2)) < 15) {
+      if (Math.hypot(goal.x - x, goal.y - y) < 15) {
         break;
       }
       
       const force = calculatePotentialField({ x, y });
-      
-      // Smooth turning like in updateCarPosition
       const targetAngle = Math.atan2(force.y, force.x);
-      const turnSpeed = 0.08;
       const angleDiff = ((targetAngle - angle + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
-      angle += Math.sign(angleDiff) * Math.min(Math.abs(angleDiff), turnSpeed);
+      angle += Math.sign(angleDiff) * Math.min(Math.abs(angleDiff), 0.08);
       
-      const normalizedSpeed = 2;
-      const newX = x + Math.cos(angle) * normalizedSpeed;
-      const newY = y + Math.sin(angle) * normalizedSpeed;
+      const newX = x + Math.cos(angle) * 2;
+      const newY = y + Math.sin(angle) * 2;
       
-      // Check if stuck (not moving significantly)
-      const movement = Math.sqrt(Math.pow(newX - lastX, 2) + Math.pow(newY - lastY, 2));
-      if (movement < 0.1) {
-        stuckCounter++;
-        if (stuckCounter > 10) break; // Break if stuck for too long
+      if (Math.abs(newX - x) < 0.1 && Math.abs(newY - y) < 0.1) {
+        if (++stuckCounter > 5) break;
       } else {
         stuckCounter = 0;
       }
       
-      lastX = x;
-      lastY = y;
+      // Quick bounds and obstacle check
+      if (newX < -margin || newX > canvasWidth + margin || 
+          newY < -margin || newY > canvasHeight + margin ||
+          obstacles.some(obs => {
+            const dx = newX - obs.x;
+            const dy = newY - obs.y;
+            return dx * dx + dy * dy < obs.radius * obs.radius;
+          })) {
+        break;
+      }
+      
       x = newX;
       y = newY;
-      
-      const hitObstacle = obstacles.some(obstacle => {
-        const dx = x - obstacle.x;
-        const dy = y - obstacle.y;
-        return Math.sqrt(dx * dx + dy * dy) < obstacle.radius;
-      });
-
-      // Use same bounds checking as calculatePaths
-      const outOfBounds = x < -margin || x > canvasWidth + margin || 
-                         y < -margin || y > canvasHeight + margin;
-      
-      if (hitObstacle || outOfBounds) break;
     }
     
     return path;
-  }, [calculatePotentialField, goal, obstacles]);
+  }, [calculatePotentialField, goal, obstacles, pathParams]);
 
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
@@ -421,7 +756,7 @@ function App() {
       ctx.strokeStyle = mode === 'dark' ? 'rgba(239, 68, 68, 0.8)' : 'rgba(220, 38, 38, 0.8)'; // Red-500 : Red-600
       ctx.lineWidth = 5;
 
-      carPath.forEach((point, index) => {
+      carPath.forEach((point: PathPoint, index: number) => {
         if (index === 0) {
           ctx.moveTo(point.x * scaleX / dpr, point.y * scaleY / dpr);
         } else {
@@ -467,71 +802,193 @@ function App() {
       car.x * scaleX / dpr, 
       car.y * scaleY / dpr, 
       car.angle, 
-      isSettingStart 
-        ? mode === 'dark' ? '#60a5fa' : '#3b82f6' // Blue-400 : Blue-500
-        : mode === 'dark' ? '#f87171' : '#ef4444' // Red-400 : Red-500
+      selectedObject === 'car' ? 'rgba(239, 68, 68, 0.8)' : 'rgba(220, 38, 38, 0.8)'
     );
 
-    // Draw "Set starting position" message
-    if (isSettingStart) {
-      ctx.save();
-      ctx.fillStyle = mode === 'dark' ? '#f8fafc' : '#0f172a'; // Slate-50 : Slate-900
-      ctx.font = `${16 * scaleX / dpr}px Inter`;
-      ctx.textAlign = 'center';
-      ctx.fillText(
-        'Click and drag to set starting position and heading', 
-        canvas.width / 2, 
-        30 * scaleY / dpr
-      );
-      ctx.restore();
+    // Draw car selection UI when selected
+    if (selectedObject === 'car') {
+      ctx.save()
+      
+      // Draw selection circle
+      ctx.strokeStyle = mode === 'dark' ? '#60a5fa' : '#3b82f6' // Blue-400 : Blue-500
+      ctx.lineWidth = 2
+      ctx.setLineDash([5, 5])
+      ctx.beginPath()
+      ctx.arc(
+        car.x * scaleX / dpr,
+        car.y * scaleY / dpr,
+        25 * scaleX / dpr,
+        0,
+        Math.PI * 2
+      )
+      ctx.stroke()
+      
+      // Draw rotation handle
+      const handleRadius = 30
+      const handleX = car.x + Math.cos(car.angle) * handleRadius
+      const handleY = car.y + Math.sin(car.angle) * handleRadius
+      
+      // Draw handle line
+      ctx.setLineDash([])
+      ctx.beginPath()
+      ctx.moveTo(car.x * scaleX / dpr, car.y * scaleY / dpr)
+      ctx.lineTo(handleX * scaleX / dpr, handleY * scaleY / dpr)
+      ctx.stroke()
+      
+      // Draw handle circle
+      ctx.fillStyle = mode === 'dark' ? '#60a5fa' : '#3b82f6'
+      ctx.beginPath()
+      ctx.arc(
+        handleX * scaleX / dpr,
+        handleY * scaleY / dpr,
+        8 * scaleX / dpr,
+        0,
+        Math.PI * 2
+      )
+      ctx.fill()
+      
+      ctx.restore()
     }
-  }, [obstacles, goal, hasReachedGoal, isSettingStart, drawArrow, drawPotentialField, drawPaths, showCarPath, calculateSinglePath, mode]);
+
+    // Draw goal selection UI when selected
+    if (selectedObject === 'goal') {
+      ctx.save()
+      ctx.strokeStyle = mode === 'dark' ? '#86efac' : '#22c55e' // Green-300 : Green-500
+      ctx.lineWidth = 2
+      ctx.setLineDash([5, 5])
+      ctx.beginPath()
+      ctx.arc(
+        goal.x * scaleX / dpr,
+        goal.y * scaleY / dpr,
+        20 * scaleX / dpr,
+        0,
+        Math.PI * 2
+      )
+      ctx.stroke()
+      ctx.restore()
+    }
+  }, [obstacles, goal, hasReachedGoal, selectedObject, drawArrow, drawPotentialField, drawPaths, showCarPath, calculateSinglePath, mode]);
 
   const handleMouseDown = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (!isSettingStart) return
-    
-    const canvas = canvasRef.current
-    if (!canvas) return
+    const coords = getCanvasCoordinates(e)
+    if (!coords) return
+    const { x, y } = coords
 
-    const rect = canvas.getBoundingClientRect()
-    const dpr = window.devicePixelRatio || 1
-    const x = (e.clientX - rect.left) * (canvas.width / rect.width / dpr)
-    const y = (e.clientY - rect.top) * (canvas.height / rect.height / dpr)
+    // Check if clicking on car (only allow car movement when not running)
+    const car = carRef.current
+    if (!isRunning && isPointInCircle(x, y, car.x, car.y, 20)) {
+      setSelectedObject('car')
+      dragStateRef.current = { 
+        type: 'car', 
+        initialX: x - car.x, 
+        initialY: y - car.y 
+      }
+      return
+    }
 
-    carRef.current = { ...carRef.current, x, y }
-    isDraggingRef.current = true
-    draw()
-  }, [isSettingStart, draw])
+    // Check if clicking on car's rotation handle (only when car is selected and not running)
+    if (!isRunning && selectedObject === 'car') {
+      const handleRadius = 30
+      const handleX = car.x + Math.cos(car.angle) * handleRadius
+      const handleY = car.y + Math.sin(car.angle) * handleRadius
+      if (isPointInCircle(x, y, handleX, handleY, 10)) {
+        dragStateRef.current = {
+          type: 'rotation',
+          initialX: x,
+          initialY: y,
+          initialAngle: car.angle,
+          centerX: car.x,
+          centerY: car.y
+        }
+        return
+      }
+    }
+
+    // Check if clicking on goal (always allowed)
+    if (isPointInCircle(x, y, goal.x, goal.y, 15)) {
+      setSelectedObject('goal')
+      dragStateRef.current = { 
+        type: 'goal', 
+        initialX: x - goal.x, 
+        initialY: y - goal.y 
+      }
+      return
+    }
+
+    // If clicked elsewhere, clear selection
+    setSelectedObject(null)
+  }, [isRunning, goal, selectedObject, getCanvasCoordinates])
 
   const handleMouseMove = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (!isSettingStart || !isDraggingRef.current) return
-    
-    const canvas = canvasRef.current
-    if (!canvas) return
+    const coords = getCanvasCoordinates(e)
+    if (!coords) return
+    const { x, y } = coords
 
-    const rect = canvas.getBoundingClientRect()
-    const dpr = window.devicePixelRatio || 1
-    const x = (e.clientX - rect.left) * (canvas.width / rect.width / dpr)
-    const y = (e.clientY - rect.top) * (canvas.height / rect.height / dpr)
+    const dragState = dragStateRef.current
+    if (dragState.type === 'car' && !isRunning) {
+      setHasReachedGoal(false)
+      carRef.current = {
+        ...carRef.current,
+        x: x - dragState.initialX,
+        y: y - dragState.initialY
+      }
+      draw()
+    } else if (dragState.type === 'goal') {
+      setHasReachedGoal(false)
+      const newGoal = {
+        x: x - dragState.initialX,
+        y: y - dragState.initialY
+      }
+      
+      // Update goal position immediately for smooth dragging
+      setGoal(newGoal);
+      draw();
+      
+      // Debounce path updates with a longer interval
+      if (showPaths && autoUpdatePaths) {
+        const now = Date.now();
+        if (!dragState.lastUpdate || now - dragState.lastUpdate > 250) { // Increased to 250ms
+          calculatePaths();
+          dragState.lastUpdate = now;
+        }
+      }
+    } else if (dragState.type === 'rotation' && !isRunning && dragState.centerX !== undefined && dragState.centerY !== undefined) {
+      setHasReachedGoal(false)
+      const angle = Math.atan2(
+        y - dragState.centerY,
+        x - dragState.centerX
+      )
+      carRef.current = {
+        ...carRef.current,
+        angle
+      }
+      draw()
+    }
+
+    // Update cursor based on hover state
+    const car = carRef.current
+    const isOverCar = isPointInCircle(x, y, car.x, car.y, 20)
+    const isOverGoal = isPointInCircle(x, y, goal.x, goal.y, 15)
     
-    const dx = x - carRef.current.x
-    const dy = y - carRef.current.y
-    const angle = Math.atan2(dy, dx)
-    
-    carRef.current = { ...carRef.current, angle }
-    draw()
-  }, [isSettingStart, draw])
+    if (dragState.type === 'rotation') {
+      e.currentTarget.style.cursor = 'grabbing'
+    } else if ((isOverCar && !isRunning) || isOverGoal) {
+      e.currentTarget.style.cursor = dragState.type ? 'grabbing' : 'grab'
+    } else if (selectedObject === 'car' && !isRunning) {
+      const handleRadius = 30
+      const handleX = car.x + Math.cos(car.angle) * handleRadius
+      const handleY = car.y + Math.sin(car.angle) * handleRadius
+      const isOverHandle = isPointInCircle(x, y, handleX, handleY, 10)
+      e.currentTarget.style.cursor = isOverHandle ? 'pointer' : 'default'
+    } else {
+      e.currentTarget.style.cursor = 'default'
+    }
+  }, [draw, goal, selectedObject, isRunning, getCanvasCoordinates, showPaths, autoUpdatePaths, calculatePaths]);
 
   const handleMouseUp = useCallback(() => {
-    isDraggingRef.current = false
+    dragStateRef.current = { type: null, initialX: 0, initialY: 0 }
   }, [])
 
-  const resetSimulation = useCallback(() => {
-    carRef.current = { x: 50, y: 50, angle: 0, velocity: 0 }
-    setHasReachedGoal(false)
-    // Instead of calling draw directly, request an animation frame
-    requestAnimationFrame(draw)
-  }, [draw])
 
   const updateCarPosition = useCallback(() => {
     if (hasReachedGoal) return
@@ -539,7 +996,7 @@ function App() {
     const car = carRef.current
     const distanceToGoal = Math.sqrt(
       Math.pow(goal.x - car.x, 2) + Math.pow(goal.y - car.y, 2)
-    )
+    );
     
     if (distanceToGoal < 15) {
       setHasReachedGoal(true)
@@ -590,160 +1047,6 @@ function App() {
     }
   }, []);
 
-  const calculatePaths = useCallback(async () => {
-    setIsCalculatingPaths(true);
-    const newPaths: SimulationPath[] = [];
-    const gridSize = 35; // Reduced for better coverage
-    const maxSteps = 2000; // Increased to allow for much longer paths
-    
-    // Get actual canvas dimensions accounting for DPR
-    const canvas = canvasRef.current;
-    if (!canvas) {
-      setIsCalculatingPaths(false);
-      return;
-    }
-    
-    const rect = canvas.getBoundingClientRect();
-    const canvasWidth = rect.width;
-    const canvasHeight = rect.height;
-    
-    // Create a grid of starting points that covers the entire canvas plus margins
-    const margin = Math.max(canvasWidth, canvasHeight) * 0.2; // Dynamic margin based on canvas size
-    const startPoints: Array<{x: number, y: number}> = [];
-    
-    // Generate points in a radial pattern around the goal for better coverage
-    const goalX = goal.x * (rect.width / canvas.width);
-    const goalY = goal.y * (rect.height / canvas.height);
-    const maxRadius = Math.sqrt(Math.pow(canvasWidth + margin * 2, 2) + Math.pow(canvasHeight + margin * 2, 2));
-    const angleStep = Math.PI / 16; // Smaller angle step for more radial lines
-    const radiusStep = gridSize; // Use gridSize as radius step
-    
-    // Add regular grid points
-    for (let x = -margin; x <= canvasWidth + margin; x += gridSize) {
-      for (let y = -margin; y <= canvasHeight + margin; y += gridSize) {
-        // Convert screen coordinates to canvas coordinates
-        const canvasX = x * (canvas.width / rect.width);
-        const canvasY = y * (canvas.height / rect.height);
-        startPoints.push({x: canvasX, y: canvasY});
-      }
-    }
-    
-    // Add radial points
-    for (let angle = 0; angle < Math.PI * 2; angle += angleStep) {
-      for (let r = 0; r <= maxRadius; r += radiusStep) {
-        const screenX = goalX + r * Math.cos(angle);
-        const screenY = goalY + r * Math.sin(angle);
-        
-        // Convert screen coordinates to canvas coordinates
-        const canvasX = screenX * (canvas.width / rect.width);
-        const canvasY = screenY * (canvas.height / rect.height);
-        
-        // Only add points that are within our extended bounds
-        if (canvasX >= -margin * (canvas.width / rect.width) && 
-            canvasX <= (canvasWidth + margin) * (canvas.width / rect.width) && 
-            canvasY >= -margin * (canvas.height / rect.height) && 
-            canvasY <= (canvasHeight + margin) * (canvas.height / rect.height)) {
-          startPoints.push({x: canvasX, y: canvasY});
-        }
-      }
-    }
-    
-    // Process each starting point
-    for (const {x: startX, y: startY} of startPoints) {
-      // Skip if starting point is inside an obstacle
-      const isInsideObstacle = obstacles.some(obstacle => {
-        const dx = startX - obstacle.x;
-        const dy = startY - obstacle.y;
-        return Math.sqrt(dx * dx + dy * dy) < obstacle.radius + 5;
-      });
-
-      if (isInsideObstacle) continue;
-
-      
-      // Try multiple initial angles for each starting point
-      const numAngles = randomizeHeading ? 1 : 4;
-      for (let i = 0; i < numAngles; i++) {
-        const path: PathPoint[] = [];
-        let x = startX;
-        let y = startY;
-        let completed = false;
-        
-        // Set initial angle based on randomizeHeading setting or evenly distributed angles
-        let angle = randomizeHeading 
-          ? Math.random() * Math.PI * 2 
-          : (Math.atan2(goal.y - y, goal.x - x) + (i * Math.PI / 2)) % (Math.PI * 2);
-        
-        let stuckCounter = 0;
-        let lastX = x;
-        let lastY = y;
-        
-        for (let step = 0; step < maxSteps; step++) {
-          path.push({ x, y });
-          
-          // Check if reached goal
-          if (Math.sqrt(Math.pow(goal.x - x, 2) + Math.pow(goal.y - y, 2)) < 15) {
-            completed = true;
-            break;
-          }
-          
-          const force = calculatePotentialField({ x, y });
-          
-          // Smooth turning like in updateCarPosition
-          const targetAngle = Math.atan2(force.y, force.x);
-          const turnSpeed = 0.08;
-          const angleDiff = ((targetAngle - angle + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
-          angle += Math.sign(angleDiff) * Math.min(Math.abs(angleDiff), turnSpeed);
-          
-          const normalizedSpeed = 2;
-          const newX = x + Math.cos(angle) * normalizedSpeed;
-          const newY = y + Math.sin(angle) * normalizedSpeed;
-          
-          // Check if stuck (not moving significantly)
-          const movement = Math.sqrt(Math.pow(newX - lastX, 2) + Math.pow(newY - lastY, 2));
-          if (movement < 0.1) {
-            stuckCounter++;
-            if (stuckCounter > 10) break; // Break if stuck for too long
-          } else {
-            stuckCounter = 0;
-          }
-          
-          lastX = x;
-          lastY = y;
-          x = newX;
-          y = newY;
-          
-          // Check for collisions and bounds
-          const hitObstacle = obstacles.some(obstacle => {
-            const dx = x - obstacle.x;
-            const dy = y - obstacle.y;
-            return Math.sqrt(dx * dx + dy * dy) < obstacle.radius;
-          });
-
-          // Allow paths to extend far beyond canvas bounds
-          const outOfBounds = x < -margin || x > canvasWidth + margin || 
-                            y < -margin || y > canvasHeight + margin;
-          
-          if (hitObstacle || outOfBounds) break;
-        }
-        
-        // Only add paths that have a minimum length and either reach the goal or travel a significant distance
-        const minPathLength = 10;
-        const significantDistance = 50;
-        const distanceTraveled = path.length > 1 ? 
-          Math.sqrt(Math.pow(path[path.length-1].x - path[0].x, 2) + 
-                   Math.pow(path[path.length-1].y - path[0].y, 2)) : 0;
-                   
-        if (path.length > minPathLength && (completed || distanceTraveled > significantDistance)) {
-          newPaths.push({ points: path, completed });
-        }
-      }
-    }
-    
-    setPaths(newPaths);
-    setShowPaths(true);
-    setIsCalculatingPaths(false);
-  }, [calculatePotentialField, obstacles, goal, randomizeHeading]);
-
   useEffect(() => {
     // Initial draw
     draw()
@@ -791,6 +1094,13 @@ function App() {
     }
   }, [setupCanvas, draw]);
 
+  useEffect(() => {
+    // Calculate paths on mount if showPaths is true
+    if (showPaths && !isCalculatingPaths) {
+      calculatePaths();
+    }
+  }, []); // Empty dependency array means this runs once on mount
+
   return (
     <ThemeProvider theme={theme}>
       <CssBaseline />
@@ -820,195 +1130,397 @@ function App() {
               }}
             >
               <Stack spacing={2}>
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <Typography variant="h6">Controls</Typography>
-                  <IconButton onClick={() => setMode(mode === 'dark' ? 'light' : 'dark')} color="inherit">
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+                  <Typography variant="h6" sx={{ fontWeight: 500 }}>Controls</Typography>
+                  <IconButton onClick={() => setMode(mode === 'dark' ? 'light' : 'dark')} color="inherit" size="small">
                     {mode === 'dark' ? <Brightness7 /> : <Brightness4 />}
                   </IconButton>
                 </Box>
-                
-                {/* Position and Start/Stop controls */}
-                <Button
-                  fullWidth
-                  variant="contained"
-                  startIcon={isSettingStart ? <Check /> : <GpsFixed />}
-                  onClick={() => {
-                    if (isSettingStart) {
-                      setIsSettingStart(false)
-                    } else if (!isRunning) {
-                      resetSimulation()
-                      setIsSettingStart(true)
-                    }
-                    setIsRunning(false)
-                  }}
-                  color={isSettingStart ? "success" : "primary"}
-                >
-                  {isSettingStart ? 'Confirm Position' : 'Set Position'}
-                </Button>
 
-                <Button
-                  fullWidth
-                  variant="contained"
-                  startIcon={isRunning ? <Stop /> : <PlayArrow />}
-                  onClick={() => setIsRunning(!isRunning)}
-                  disabled={isSettingStart}
-                  color={isRunning ? "error" : "success"}
-                >
-                  {isRunning ? 'Stop' : 'Start'}
-                </Button>
-
-                <Button
-                  fullWidth
-                  variant="contained"
-                  onClick={() => setShowField(!showField)}
-                  color="secondary"
-                >
-                  {showField ? 'Hide Field' : 'Show Field'}
-                </Button>
-
-                <Button
-                  fullWidth
-                  variant="contained"
-                  onClick={() => setShowFieldMagnitude(!showFieldMagnitude)}
-                  color="secondary"
-                  disabled={!showField}
-                >
-                  {showFieldMagnitude ? 'Show Components' : 'Show Magnitude'}
-                </Button>
-
-                <Stack direction="row" spacing={1} alignItems="center">
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                    <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                      <Checkbox
-                        checked={randomizeHeading}
-                        onChange={(e) => setRandomizeHeading(e.target.checked)}
-                        size="small"
-                      />
-                      <Typography variant="body2">Random Heading</Typography>
-                    </Box>
-                    <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                      <Checkbox
-                        checked={showCarPath}
-                        onChange={(e) => setShowCarPath(e.target.checked)}
-                        size="small"
-                      />
-                      <Typography variant="body2">Show Car Path</Typography>
-                    </Box>
-                  </Box>
-                  <Button
-                    variant="contained"
-                    onClick={() => {
-                      if (!showPaths) {
-                        calculatePaths();
-                      } else {
-                        setShowPaths(false);
-                      }
-                    }}
-                    color="secondary"
-                    disabled={isCalculatingPaths}
-                    size="small"
-                  >
-                    {isCalculatingPaths ? 'Calculating...' : (showPaths ? 'Hide Paths' : 'Show Paths')}
-                  </Button>
-                </Stack>
-
-                <Divider sx={{ my: 1 }} />
-
-                {/* Speed control */}
-                <Box sx={{ 
-                  backgroundColor: 'background.paper',
-                  p: 2,
-                  borderRadius: 1
-                }}>
-                  <Stack spacing={1}>
-                    <Stack direction="row" alignItems="center" spacing={1}>
-                      <SpeedIcon color="primary" />
-                      <Typography>Speed</Typography>
+                {/* World Initialization Section */}
+                <Accordion defaultExpanded>
+                  <AccordionSummary expandIcon={<ExpandMore />}>
+                    <Stack direction="row" spacing={1} alignItems="center">
+                      <SettingsIcon fontSize="small" />
+                      <Typography>World Setup</Typography>
                     </Stack>
-                    <Slider
-                      value={speed}
-                      onChange={(_, value) => setSpeed(value as number)}
-                      min={1}
-                      max={5}
-                      step={0.5}
-                      valueLabelDisplay="auto"
-                    />
-                  </Stack>
-                </Box>
+                  </AccordionSummary>
+                  <AccordionDetails>
+                    <Stack spacing={2}>
+                      <FormControl fullWidth size="small">
+                        <InputLabel>Obstacle Generation</InputLabel>
+                        <Select
+                          value={worldInit.method}
+                          label="Obstacle Generation"
+                          onChange={(e) => setWorldInit(prev => ({ ...prev, method: e.target.value as WorldInitialization['method'] }))}
+                        >
+                          <MenuItem value="random">Random Distribution</MenuItem>
+                          <MenuItem value="uniform">Uniform Grid</MenuItem>
+                          <MenuItem value="custom">Custom (Click to Place)</MenuItem>
+                        </Select>
+                      </FormControl>
+                      
+                      <Box>
+                        <Typography variant="body2" gutterBottom>Number of Obstacles</Typography>
+                        <Slider
+                          value={worldInit.numObstacles}
+                          onChange={(_, value) => {
+                            setWorldInit(prev => ({ ...prev, numObstacles: value as number }));
+                            if (!isRunning) {
+                              setObstacles(generateRandomObstacles({
+                                ...worldInit,
+                                numObstacles: value as number
+                              }));
+                            }
+                          }}
+                          min={5}
+                          max={20}
+                          step={1}
+                          valueLabelDisplay="auto"
+                          size="small"
+                        />
+                      </Box>
 
-                {/* Goal Attraction control */}
-                <Box sx={{ 
-                  backgroundColor: 'background.paper',
-                  p: 2,
-                  borderRadius: 1
-                }}>
-                  <Stack spacing={1}>
-                    <Typography>Goal Attraction</Typography>
-                    <Slider
-                      value={goalWeight}
-                      onChange={(_, value) => setGoalWeight(value as number)}
-                      min={0.1}
-                      max={2.0}
-                      step={0.1}
-                      valueLabelDisplay="auto"
-                    />
-                  </Stack>
-                </Box>
+                      <Box>
+                        <Typography variant="body2" gutterBottom>Obstacle Size Range</Typography>
+                        <Slider
+                          value={[worldInit.minRadius, worldInit.maxRadius]}
+                          onChange={(_, value) => {
+                            const [min, max] = value as number[];
+                            setWorldInit(prev => ({ ...prev, minRadius: min, maxRadius: max }));
+                            if (!isRunning) {
+                              setObstacles(generateRandomObstacles({
+                                ...worldInit,
+                                minRadius: min,
+                                maxRadius: max
+                              }));
+                            }
+                          }}
+                          min={10}
+                          max={50}
+                          step={1}
+                          valueLabelDisplay="auto"
+                          size="small"
+                          disableSwap
+                        />
+                        <Stack direction="row" justifyContent="space-between">
+                          <Typography variant="caption" color="text.secondary">
+                            Min: {worldInit.minRadius}px
+                          </Typography>
+                          <Typography variant="caption" color="text.secondary">
+                            Max: {worldInit.maxRadius}px
+                          </Typography>
+                        </Stack>
+                      </Box>
 
-                {/* Obstacle Repulsion control */}
-                <Box sx={{ 
-                  backgroundColor: 'background.paper',
-                  p: 2,
-                  borderRadius: 1
-                }}>
-                  <Stack spacing={1}>
-                    <Typography>Obstacle Repulsion</Typography>
-                    <Slider
-                      value={obstacleWeight}
-                      onChange={(_, value) => setObstacleWeight(value as number)}
-                      min={1000}
-                      max={5000}
-                      step={100}
-                      valueLabelDisplay="auto"
-                    />
-                  </Stack>
-                </Box>
+                      <Button
+                        variant="contained"
+                        size="small"
+                        color="secondary"
+                        startIcon={<RefreshIcon />}
+                        onClick={() => {
+                          const newSeed = Math.floor(Math.random() * 1000000);
+                          setWorldInit(prev => ({ ...prev, seed: newSeed }));
+                          if (!isRunning) {
+                            setObstacles(generateRandomObstacles({
+                              ...worldInit,
+                              seed: newSeed
+                            }));
+                          }
+                        }}
+                        disabled={isRunning}
+                      >
+                        Regenerate World
+                      </Button>
+                    </Stack>
+                  </AccordionDetails>
+                </Accordion>
 
-                {/* Arrow Scale control */}
-                <Box sx={{ 
-                  backgroundColor: 'background.paper',
-                  p: 2,
-                  borderRadius: 1
-                }}>
-                  <Stack spacing={1}>
-                    <Typography>Arrow Scale</Typography>
-                    <Slider
-                      value={arrowScale}
-                      onChange={(_, value) => setArrowScale(value as number)}
-                      min={0.5}
-                      max={3.0}
-                      step={0.1}
-                      valueLabelDisplay="auto"
-                    />
-                  </Stack>
-                </Box>
+                {/* Animation Controls Section */}
+                <Accordion defaultExpanded>
+                  <AccordionSummary expandIcon={<ExpandMore />}>
+                    <Stack direction="row" spacing={1} alignItems="center">
+                      <AnimationIcon fontSize="small" />
+                      <Typography>Animation</Typography>
+                    </Stack>
+                  </AccordionSummary>
+                  <AccordionDetails>
+                    <Stack spacing={2}>
+                      <Button
+                        fullWidth
+                        variant="contained"
+                        size="small"
+                        startIcon={isRunning ? <Stop /> : <PlayArrow />}
+                        onClick={() => {
+                          if (!isRunning) {
+                            setSelectedObject(null)
+                            setHasReachedGoal(false)
+                          }
+                          setIsRunning(!isRunning)
+                        }}
+                        color={isRunning ? "error" : "success"}
+                      >
+                        {isRunning ? 'Stop' : 'Start'}
+                      </Button>
+
+                      <Box>
+                        <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
+                          <SpeedIcon fontSize="small" color="primary" />
+                          <Typography variant="body2">Animation Speed</Typography>
+                        </Stack>
+                        <Slider
+                          value={speed}
+                          onChange={(_, value) => setSpeed(value as number)}
+                          min={1}
+                          max={5}
+                          step={0.5}
+                          valueLabelDisplay="auto"
+                          size="small"
+                        />
+                      </Box>
+
+                      <FormControlLabel
+                        control={
+                          <Checkbox
+                            checked={showCarPath}
+                            onChange={(e) => setShowCarPath(e.target.checked)}
+                            size="small"
+                          />
+                        }
+                        label={<Typography variant="body2">Show Current Path</Typography>}
+                      />
+                    </Stack>
+                  </AccordionDetails>
+                </Accordion>
+
+                {/* Visualization Controls Section */}
+                <Accordion>
+                  <AccordionSummary expandIcon={<ExpandMore />}>
+                    <Stack direction="row" spacing={1} alignItems="center">
+                      <GridIcon fontSize="small" />
+                      <Typography>Visualization</Typography>
+                    </Stack>
+                  </AccordionSummary>
+                  <AccordionDetails>
+                    <Stack spacing={2}>
+                      <Box>
+                        <Typography variant="body2" gutterBottom>Grid Resolution</Typography>
+                        <Slider
+                          value={pathParams.gridSize}
+                          onChange={(_, value) => {
+                            setPathParams(prev => ({ ...prev, gridSize: value as number }));
+                            // TODO: Update field resolution to match
+                          }}
+                          min={15}
+                          max={100}
+                          step={5}
+                          valueLabelDisplay="auto"
+                          size="small"
+                        />
+                      </Box>
+
+                      <FormControlLabel
+                        control={
+                          <Checkbox
+                            checked={showField}
+                            onChange={(e) => setShowField(e.target.checked)}
+                            size="small"
+                          />
+                        }
+                        label={<Typography variant="body2">Show Potential Field</Typography>}
+                      />
+
+                      <FormControlLabel
+                        control={
+                          <Checkbox
+                            checked={showFieldMagnitude}
+                            onChange={(e) => setShowFieldMagnitude(e.target.checked)}
+                            size="small"
+                            disabled={!showField}
+                          />
+                        }
+                        label={<Typography variant="body2">Show Field Magnitude</Typography>}
+                      />
+
+                      <Box>
+                        <Typography variant="body2" gutterBottom>Arrow Scale</Typography>
+                        <Slider
+                          value={arrowScale}
+                          onChange={(_, value) => setArrowScale(value as number)}
+                          min={0.5}
+                          max={3.0}
+                          step={0.1}
+                          valueLabelDisplay="auto"
+                          size="small"
+                          disabled={!showField}
+                        />
+                      </Box>
+
+                      <Box>
+                        <Typography variant="body2" gutterBottom>Arrow Thickness</Typography>
+                        <Slider
+                          value={arrowThickness}
+                          onChange={(_, value) => setArrowThickness(value as number)}
+                          min={0.5}
+                          max={4.0}
+                          step={0.5}
+                          valueLabelDisplay="auto"
+                          size="small"
+                          disabled={!showField}
+                        />
+                      </Box>
+
+                      <Box>
+                        <Typography variant="body2" gutterBottom>Arrowhead Size</Typography>
+                        <Slider
+                          value={arrowheadSize}
+                          onChange={(_, value) => setArrowheadSize(value as number)}
+                          min={0.5}
+                          max={2.0}
+                          step={0.1}
+                          valueLabelDisplay="auto"
+                          size="small"
+                          disabled={!showField}
+                        />
+                      </Box>
+                    </Stack>
+                  </AccordionDetails>
+                </Accordion>
+
+                {/* Force Parameters Section */}
+                <Accordion>
+                  <AccordionSummary expandIcon={<ExpandMore />}>
+                    <Stack direction="row" spacing={1} alignItems="center">
+                      <ScienceIcon fontSize="small" />
+                      <Typography>Force Parameters</Typography>
+                    </Stack>
+                  </AccordionSummary>
+                  <AccordionDetails>
+                    <Stack spacing={2}>
+                      <Box>
+                        <Typography variant="body2" gutterBottom>Goal Attraction</Typography>
+                        <Slider
+                          value={goalWeight}
+                          onChange={(_, value) => setGoalWeight(value as number)}
+                          min={0.1}
+                          max={2.0}
+                          step={0.1}
+                          valueLabelDisplay="auto"
+                          size="small"
+                        />
+                      </Box>
+
+                      <Box>
+                        <Typography variant="body2" gutterBottom>Obstacle Repulsion</Typography>
+                        <Slider
+                          value={obstacleWeight}
+                          onChange={(_, value) => setObstacleWeight(value as number)}
+                          min={1000}
+                          max={5000}
+                          step={100}
+                          valueLabelDisplay="auto"
+                          size="small"
+                        />
+                      </Box>
+                    </Stack>
+                  </AccordionDetails>
+                </Accordion>
+
+                {/* Path Analysis Section */}
+                <Accordion>
+                  <AccordionSummary expandIcon={<ExpandMore />}>
+                    <Stack direction="row" spacing={1} alignItems="center">
+                      <PathIcon fontSize="small" />
+                      <Typography>Path Analysis</Typography>
+                    </Stack>
+                  </AccordionSummary>
+                  <AccordionDetails>
+                    <Stack spacing={2}>
+                      <FormControlLabel
+                        control={
+                          <Checkbox
+                            checked={showPaths}
+                            onChange={(e) => {
+                              setShowPaths(e.target.checked);
+                              if (e.target.checked && !isCalculatingPaths) {
+                                calculatePaths();
+                              }
+                            }}
+                            size="small"
+                          />
+                        }
+                        label={<Typography variant="body2">Show Possible Paths</Typography>}
+                      />
+
+                      <FormControlLabel
+                        control={
+                          <Checkbox
+                            checked={autoUpdatePaths}
+                            onChange={(e) => setAutoUpdatePaths(e.target.checked)}
+                            size="small"
+                          />
+                        }
+                        label={<Typography variant="body2">Auto-update Paths</Typography>}
+                      />
+
+                      <FormControlLabel
+                        control={
+                          <Checkbox
+                            checked={randomizeHeading}
+                            onChange={(e) => setRandomizeHeading(e.target.checked)}
+                            size="small"
+                          />
+                        }
+                        label={<Typography variant="body2">Randomize Initial Heading</Typography>}
+                      />
+
+                      <Box>
+                        <Typography variant="body2" gutterBottom>Angles per Point</Typography>
+                        <Slider
+                          value={pathParams.numAnglesPerPoint}
+                          onChange={(_, value) => setPathParams(prev => ({ ...prev, numAnglesPerPoint: value as number }))}
+                          min={1}
+                          max={8}
+                          step={1}
+                          valueLabelDisplay="auto"
+                          size="small"
+                          disabled={randomizeHeading}
+                        />
+                      </Box>
+
+                      <Box>
+                        <Typography variant="body2" gutterBottom>Min Path Length</Typography>
+                        <Slider
+                          value={pathParams.minPathLength}
+                          onChange={(_, value) => setPathParams(prev => ({ ...prev, minPathLength: value as number }))}
+                          min={5}
+                          max={50}
+                          step={5}
+                          valueLabelDisplay="auto"
+                          size="small"
+                        />
+                      </Box>
+
+                      <Box>
+                        <Typography variant="body2" gutterBottom>Significant Distance</Typography>
+                        <Slider
+                          value={pathParams.significantDistance}
+                          onChange={(_, value) => setPathParams(prev => ({ ...prev, significantDistance: value as number }))}
+                          min={20}
+                          max={200}
+                          step={10}
+                          valueLabelDisplay="auto"
+                          size="small"
+                        />
+                      </Box>
+                    </Stack>
+                  </AccordionDetails>
+                </Accordion>
               </Stack>
             </Paper>
 
             {/* Main content area */}
             <Stack spacing={2} sx={{ flex: 1 }}>
-              {hasReachedGoal && (
-                <Alert 
-                  severity="success" 
-                  sx={{ 
-                    backgroundColor: 'success.light',
-                    color: 'success.dark'
-                  }}
-                >
-                  Goal reached successfully!
-                </Alert>
-              )}
-
               <Paper 
                 elevation={3}
                 sx={{ 
@@ -1021,7 +1533,7 @@ function App() {
                 <canvas 
                   ref={canvasRef}
                   style={{ 
-                    cursor: isSettingStart ? 'crosshair' : 'default',
+                    cursor: selectedObject ? 'grabbing' : 'default',
                     display: 'block',
                     width: '100%',
                     height: '100%',
