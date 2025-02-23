@@ -1,6 +1,19 @@
 # Potential Field Path Planning Visualization
 
+[![React](https://img.shields.io/badge/React-18-blue.svg)](https://reactjs.org/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.0-blue.svg)](https://www.typescriptlang.org/)
+[![Material-UI](https://img.shields.io/badge/MUI-5.0-blue.svg)](https://mui.com/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
 An interactive visualization tool for potential field-based path planning, built with React and Material-UI. This application demonstrates how artificial potential fields can be used for robot navigation and path planning.
+
+🎮 **[Try the Live Demo](https://neovand.github.io/dpp/)**
+
+This tool helps understand and visualize:
+- How potential fields guide robot navigation
+- The interaction between attractive and repulsive forces
+- Path planning in the presence of obstacles
+- The effects of different force parameters on path generation
 
 ![Screenshot](./screenshot.jpg)
 
