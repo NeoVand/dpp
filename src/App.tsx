@@ -101,6 +101,12 @@ interface WorldInitialization {
   maxRadius: number;
 }
 
+interface Goal {
+  x: number;
+  y: number;
+  angle?: number;  // Optional angle for directional goals
+}
+
 function App() {
   const prefersDarkMode = useMediaQuery('(prefers-color-scheme: dark)')
   const [mode, setMode] = useState<'light' | 'dark'>(prefersDarkMode ? 'dark' : 'light')
@@ -279,7 +285,7 @@ function App() {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const carRef = useRef<Car>({ x: 50, y: 50, angle: 0, velocity: 0 })
   const [obstacles, setObstacles] = useState<Obstacle[]>(() => generateRandomObstacles(worldInit))
-  const [goal, setGoal] = useState({ x: 750, y: 550 })
+  const [goal, setGoal] = useState<Goal>({ x: 750, y: 550 })
   const animationFrameRef = useRef<number | undefined>(undefined)
   const [isRunning, setIsRunning] = useState(false)
   const [speed, setSpeed] = useState(2)
@@ -298,6 +304,7 @@ function App() {
   const [showCarPath, setShowCarPath] = useState(false)
   const [selectedObject, setSelectedObject] = useState<'car' | 'goal' | null>(null)
   const dragStateRef = useRef<DragState>({ type: null, initialX: 0, initialY: 0 })
+  const [goalType, setGoalType] = useState<'position' | 'direction'>('position')
 
   // Update the generateRandomObstacles function
   function generateRandomObstacles(params: WorldInitialization): Obstacle[] {
@@ -607,14 +614,34 @@ function App() {
         
         const distToGoal = Math.hypot(goal.x - x, goal.y - y);
         if (distToGoal < 15) {
-          completed = true;
-          break;
+          if (goalType === 'direction') {
+            const angleDiff = Math.abs(((angle - (goal.angle || 0) + Math.PI * 3) % (Math.PI * 2)) - Math.PI);
+            if (angleDiff < 0.2) { // About 11.5 degrees tolerance
+              completed = true;
+              break;
+            }
+          } else {
+            completed = true;
+            break;
+          }
         }
         
         const force = calculatePotentialField({ x, y });
         const targetAngle = Math.atan2(force.y, force.x);
-        const angleDiff = ((targetAngle - angle + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
-        angle += Math.sign(angleDiff) * Math.min(Math.abs(angleDiff), 0.08);
+        
+        // For directional goals, bias the target angle towards the goal angle when close
+        if (goalType === 'direction' && distToGoal < 50) {
+          const goalAngle = goal.angle || 0;
+          const blendFactor = Math.max(0, 1 - distToGoal / 50);
+          const angleDiff = ((goalAngle - targetAngle + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
+          const blendedAngle = targetAngle + angleDiff * blendFactor;
+          const turnSpeed = 0.08;
+          const currentAngleDiff = ((blendedAngle - angle + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
+          angle += Math.sign(currentAngleDiff) * Math.min(Math.abs(currentAngleDiff), turnSpeed);
+        } else {
+          const angleDiff = ((targetAngle - angle + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
+          angle += Math.sign(angleDiff) * Math.min(Math.abs(angleDiff), 0.08);
+        }
         
         const newX = x + Math.cos(angle) * 2;
         const newY = y + Math.sin(angle) * 2;
@@ -663,7 +690,7 @@ function App() {
     setPaths(newPaths);
     setShowPaths(true);
     setIsCalculatingPaths(false);
-  }, [calculatePotentialField, obstacles, goal, randomizeHeading, pathParams]);
+  }, [calculatePotentialField, obstacles, goal, randomizeHeading, pathParams, goalType]);
 
   // Update the auto-update paths effect
   useEffect(() => {
@@ -727,6 +754,30 @@ function App() {
     return path;
   }, [calculatePotentialField, goal, obstacles, pathParams]);
 
+  const drawDirectionalGoal = useCallback((ctx: CanvasRenderingContext2D, x: number, y: number, angle: number, color: string) => {
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(angle || 0);
+    
+    // Draw triangle
+    ctx.beginPath();
+    ctx.moveTo(15, 0);  // Point
+    ctx.lineTo(-10, -10);  // Left corner
+    ctx.lineTo(-10, 10);  // Right corner
+    ctx.closePath();
+    
+    // Fill with green color
+    ctx.fillStyle = color;
+    ctx.fill();
+    
+    // Add border
+    ctx.strokeStyle = mode === 'dark' ? '#4ade80' : '#22c55e';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    
+    ctx.restore();
+  }, [mode]);
+
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
     const ctx = canvas?.getContext('2d');
@@ -738,7 +789,7 @@ function App() {
     const scaleY = canvas.height / rect.height;
 
     // Clear canvas with theme background
-    ctx.fillStyle = mode === 'dark' ? '#1e293b' : '#ffffff'; // Slate-800 : White
+    ctx.fillStyle = mode === 'dark' ? '#1e293b' : '#ffffff';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
     // Draw potential field
@@ -753,7 +804,7 @@ function App() {
       const carPath = calculateSinglePath(car.x, car.y, car.angle);
       
       ctx.beginPath();
-      ctx.strokeStyle = mode === 'dark' ? 'rgba(239, 68, 68, 0.8)' : 'rgba(220, 38, 38, 0.8)'; // Red-500 : Red-600
+      ctx.strokeStyle = mode === 'dark' ? 'rgba(239, 68, 68, 0.8)' : 'rgba(220, 38, 38, 0.8)';
       ctx.lineWidth = 5;
 
       carPath.forEach((point: PathPoint, index: number) => {
@@ -768,7 +819,7 @@ function App() {
     }
 
     // Draw obstacles
-    ctx.fillStyle = mode === 'dark' ? '#94a3b8' : '#64748b'; // Slate-400 : Slate-500
+    ctx.fillStyle = mode === 'dark' ? '#94a3b8' : '#64748b';
     obstacles.forEach(obstacle => {
       ctx.beginPath();
       ctx.arc(
@@ -781,19 +832,32 @@ function App() {
       ctx.fill();
     });
 
-    // Draw goal
-    ctx.fillStyle = hasReachedGoal 
-      ? mode === 'dark' ? '#4ade80' : '#22c55e' // Green-400 : Green-500
-      : mode === 'dark' ? '#86efac' : '#22c55e'; // Green-300 : Green-500
-    ctx.beginPath();
-    ctx.arc(
-      goal.x * scaleX / dpr, 
-      goal.y * scaleY / dpr, 
-      10 * scaleX / dpr, 
-      0, 
-      Math.PI * 2
-    );
-    ctx.fill();
+    // Draw goal based on type
+    if (goalType === 'position') {
+      ctx.fillStyle = hasReachedGoal 
+        ? mode === 'dark' ? '#4ade80' : '#22c55e' // Green-400 : Green-500
+        : mode === 'dark' ? '#86efac' : '#22c55e'; // Green-300 : Green-500
+      ctx.beginPath();
+      ctx.arc(
+        goal.x * scaleX / dpr, 
+        goal.y * scaleY / dpr, 
+        10 * scaleX / dpr, 
+        0, 
+        Math.PI * 2
+      );
+      ctx.fill();
+    } else {
+      const color = hasReachedGoal 
+        ? mode === 'dark' ? '#4ade80' : '#22c55e' // Green-400 : Green-500
+        : mode === 'dark' ? '#86efac' : '#22c55e'; // Green-300 : Green-500
+      drawDirectionalGoal(
+        ctx,
+        goal.x * scaleX / dpr,
+        goal.y * scaleY / dpr,
+        goal.angle || 0,
+        color
+      );
+    }
 
     // Draw car as arrow
     const car = carRef.current;
@@ -867,12 +931,12 @@ function App() {
       ctx.stroke()
       ctx.restore()
     }
-  }, [obstacles, goal, hasReachedGoal, selectedObject, drawArrow, drawPotentialField, drawPaths, showCarPath, calculateSinglePath, mode]);
+  }, [mode, drawPotentialField, drawPaths, showCarPath, calculateSinglePath, obstacles, goalType, hasReachedGoal, goal, selectedObject, drawArrow, drawDirectionalGoal]);
 
   const handleMouseDown = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
-    const coords = getCanvasCoordinates(e)
-    if (!coords) return
-    const { x, y } = coords
+    const coords = getCanvasCoordinates(e);
+    if (!coords) return;
+    const { x, y } = coords;
 
     // Check if clicking on car (only allow car movement when not running)
     const car = carRef.current
@@ -906,25 +970,26 @@ function App() {
 
     // Check if clicking on goal (always allowed)
     if (isPointInCircle(x, y, goal.x, goal.y, 15)) {
-      setSelectedObject('goal')
+      setSelectedObject('goal');
       dragStateRef.current = { 
         type: 'goal', 
         initialX: x - goal.x, 
-        initialY: y - goal.y 
-      }
-      return
+        initialY: y - goal.y,
+        initialAngle: goal.angle
+      };
+      return;
     }
 
     // If clicked elsewhere, clear selection
-    setSelectedObject(null)
-  }, [isRunning, goal, selectedObject, getCanvasCoordinates])
+    setSelectedObject(null);
+  }, [goal, getCanvasCoordinates]);
 
   const handleMouseMove = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
-    const coords = getCanvasCoordinates(e)
-    if (!coords) return
-    const { x, y } = coords
+    const coords = getCanvasCoordinates(e);
+    if (!coords) return;
+    const { x, y } = coords;
 
-    const dragState = dragStateRef.current
+    const dragState = dragStateRef.current;
     if (dragState.type === 'car' && !isRunning) {
       setHasReachedGoal(false)
       carRef.current = {
@@ -937,8 +1002,9 @@ function App() {
       setHasReachedGoal(false)
       const newGoal = {
         x: x - dragState.initialX,
-        y: y - dragState.initialY
-      }
+        y: y - dragState.initialY,
+        angle: goalType === 'direction' ? Math.atan2(y - goal.y, x - goal.x) : goal.angle
+      };
       
       // Update goal position immediately for smooth dragging
       setGoal(newGoal);
@@ -947,7 +1013,7 @@ function App() {
       // Debounce path updates with a longer interval
       if (showPaths && autoUpdatePaths) {
         const now = Date.now();
-        if (!dragState.lastUpdate || now - dragState.lastUpdate > 250) { // Increased to 250ms
+        if (!dragState.lastUpdate || now - dragState.lastUpdate > 250) {
           calculatePaths();
           dragState.lastUpdate = now;
         }
@@ -983,7 +1049,7 @@ function App() {
     } else {
       e.currentTarget.style.cursor = 'default'
     }
-  }, [draw, goal, selectedObject, isRunning, getCanvasCoordinates, showPaths, autoUpdatePaths, calculatePaths]);
+  }, [draw, goal, selectedObject, isRunning, getCanvasCoordinates, showPaths, autoUpdatePaths, calculatePaths, goalType]);
 
   const handleMouseUp = useCallback(() => {
     dragStateRef.current = { type: null, initialX: 0, initialY: 0 }
@@ -991,46 +1057,78 @@ function App() {
 
 
   const updateCarPosition = useCallback(() => {
-    if (hasReachedGoal) return
+    if (hasReachedGoal) return;
 
-    const car = carRef.current
+    const car = carRef.current;
     const distanceToGoal = Math.sqrt(
       Math.pow(goal.x - car.x, 2) + Math.pow(goal.y - car.y, 2)
     );
     
+    // Check if we've reached the goal
     if (distanceToGoal < 15) {
-      setHasReachedGoal(true)
-      setIsRunning(false)
-      return
+      // For directional goals, also check angle
+      if (goalType === 'direction') {
+        const angleDiff = Math.abs(((car.angle - (goal.angle || 0) + Math.PI * 3) % (Math.PI * 2)) - Math.PI);
+        if (angleDiff < 0.2) { // About 11.5 degrees tolerance
+          setHasReachedGoal(true);
+          setIsRunning(false);
+        }
+      } else {
+        setHasReachedGoal(true);
+        setIsRunning(false);
+      }
+      return;
     }
 
     // Get force from potential field
-    const force = calculatePotentialField({ x: car.x, y: car.y })
+    const force = calculatePotentialField({ x: car.x, y: car.y });
     
     // Calculate desired angle from force direction
-    const targetAngle = Math.atan2(force.y, force.x)
+    const targetAngle = Math.atan2(force.y, force.x);
     
-    // Smooth turning
-    const turnSpeed = 0.08
-    const angleDiff = ((targetAngle - car.angle + Math.PI * 3) % (Math.PI * 2)) - Math.PI
-    const newAngle = car.angle + Math.sign(angleDiff) * Math.min(Math.abs(angleDiff), turnSpeed)
-
-    // Calculate force magnitude for speed adjustment
-    const forceMagnitude = Math.sqrt(force.x * force.x + force.y * force.y)
-    const maxForce = 5000 // Adjust based on your force scales
-    const normalizedSpeed = speed * (1 / (1 + forceMagnitude / maxForce))
-
-    // Update position
-    const newX = car.x + Math.cos(newAngle) * normalizedSpeed
-    const newY = car.y + Math.sin(newAngle) * normalizedSpeed
-
-    carRef.current = {
-      ...car,
-      x: newX,
-      y: newY,
-      angle: newAngle
+    // For directional goals, bias the target angle towards the goal angle when close
+    if (goalType === 'direction' && distanceToGoal < 50) {
+      const goalAngle = goal.angle || 0;
+      const blendFactor = Math.max(0, 1 - distanceToGoal / 50);
+      const angleDiff = ((goalAngle - targetAngle + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
+      const blendedAngle = targetAngle + angleDiff * blendFactor;
+      const turnSpeed = 0.08;
+      const currentAngleDiff = ((blendedAngle - car.angle + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
+      const newAngle = car.angle + Math.sign(currentAngleDiff) * Math.min(Math.abs(currentAngleDiff), turnSpeed);
+      
+      // Update position
+      const newX = car.x + Math.cos(newAngle) * speed;
+      const newY = car.y + Math.sin(newAngle) * speed;
+      
+      carRef.current = {
+        ...car,
+        x: newX,
+        y: newY,
+        angle: newAngle
+      };
+    } else {
+      // Original movement logic
+      const turnSpeed = 0.08;
+      const angleDiff = ((targetAngle - car.angle + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
+      const newAngle = car.angle + Math.sign(angleDiff) * Math.min(Math.abs(angleDiff), turnSpeed);
+      
+      // Calculate force magnitude for speed adjustment
+      const forceMagnitude = Math.sqrt(force.x * force.x + force.y * force.y);
+      const maxForce = 5000; // Adjust based on your force scales
+      const normalizedSpeed = speed * (1 / (1 + forceMagnitude / maxForce));
+      
+      // Update position
+      const newX = car.x + Math.cos(newAngle) * normalizedSpeed;
+      const newY = car.y + Math.sin(newAngle) * normalizedSpeed;
+      
+      carRef.current = {
+        ...car,
+        x: newX,
+        y: newY,
+        angle: newAngle
+      };
     }
-  }, [calculatePotentialField, speed, hasReachedGoal, goal])
+  }, [calculatePotentialField, speed, hasReachedGoal, goal, goalType]);
 
   const setupCanvas = useCallback((canvas: HTMLCanvasElement) => {
     const dpr = window.devicePixelRatio || 1;
@@ -1232,6 +1330,18 @@ function App() {
                       >
                         Regenerate World
                       </Button>
+
+                      <FormControl fullWidth size="small">
+                        <InputLabel>Goal Type</InputLabel>
+                        <Select
+                          value={goalType}
+                          label="Goal Type"
+                          onChange={(e) => setGoalType(e.target.value as 'position' | 'direction')}
+                        >
+                          <MenuItem value="position">Position Only</MenuItem>
+                          <MenuItem value="direction">Position & Direction</MenuItem>
+                        </Select>
+                      </FormControl>
                     </Stack>
                   </AccordionDetails>
                 </Accordion>
