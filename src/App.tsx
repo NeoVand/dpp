@@ -24,7 +24,8 @@ import {
   FormLabel,
   RadioGroup,
   FormControlLabel as MuiFormControlLabel,
-  Radio
+  Radio,
+  Switch
 } from '@mui/material'
 import {
   PlayArrow,
@@ -110,10 +111,12 @@ interface WorldInitialization {
   brushSize: number; // Add brush size for custom painting
 }
 
+type FieldType = 'off' | 'potential' | 'magnetic';
+
 function App() {
   const prefersDarkMode = useMediaQuery('(prefers-color-scheme: dark)')
   const [mode, setMode] = useState<'light' | 'dark'>(prefersDarkMode ? 'dark' : 'light')
-  const [goalType, setGoalType] = useState<'position' | 'direction'>('position')
+  const [goalType, setGoalType] = useState<'position' | 'direction'>('direction')
   const [goal, setGoal] = useState({ x: 400, y: 300, angle: 0 }) // Added angle property
 
   // Update the initial state
@@ -139,7 +142,7 @@ function App() {
   })
   
   // Add auto-update paths state
-  const [autoUpdatePaths, setAutoUpdatePaths] = useState(true)
+  const [autoUpdatePaths, setAutoUpdatePaths] = useState(false)
 
   // Helper function to check if a point is within a circle
   const isPointInCircle = (px: number, py: number, cx: number, cy: number, radius: number) => {
@@ -302,14 +305,17 @@ function App() {
   const [isRunning, setIsRunning] = useState(false)
   const [speed, setSpeed] = useState(2)
   const [hasReachedGoal, setHasReachedGoal] = useState(false)
+  const [calcField, setCalcField] = useState(false)
   const [showField, setShowField] = useState(false)
   const [goalWeight, setGoalWeight] = useState(0.5)
   const [obstacleWeight, setObstacleWeight] = useState(3000.0)
+  const [goalFieldType, setGoalFieldType] = useState<FieldType>('off')
+  const [obstacleFieldType, setObstacleFieldType] = useState<FieldType>('off')
   const [arrowScale, setArrowScale] = useState(1.0)
   const [arrowThickness, setArrowThickness] = useState(1.5)
   const [arrowheadSize, setArrowheadSize] = useState(1.0)
-  const [showFieldMagnitude, setShowFieldMagnitude] = useState(false)
-  const [showPaths, setShowPaths] = useState(true)
+  const [] = useState(false)
+  const [showPaths, setShowPaths] = useState(false)
   const [paths, setPaths] = useState<SimulationPath[]>([])
   const [isCalculatingPaths, setIsCalculatingPaths] = useState(false)
   const [randomizeHeading, setRandomizeHeading] = useState(true)
@@ -420,39 +426,100 @@ function App() {
     // Initialize total force
     let totalForce: Force = { x: 0, y: 0 };
     
+    // Car wheelbase constant (based on arrow size)
+    const CAR_WHEELBASE = 30;
+    
     // Calculate attractive force (F_att = -k_att * (q - q_goal))
-    const dx = position.x - goal.x;
-    const dy = position.y - goal.y;
-    const distToGoal = Math.sqrt(dx * dx + dy * dy);
-    
-    // Attractive force - linear for better behavior at long distances
-    totalForce.x = -goalWeight * dx / Math.max(distToGoal, 0.1);
-    totalForce.y = -goalWeight * dy / Math.max(distToGoal, 0.1);
-    
-    // Calculate repulsive forces from all obstacles
-    obstacles.forEach(obstacle => {
-      const dx = position.x - obstacle.x;
-      const dy = position.y - obstacle.y;
-      const distToCenter = Math.sqrt(dx * dx + dy * dy);
-      const rho = Math.max(0.1, distToCenter - obstacle.radius); // Distance to surface
-      const rho_0 = obstacle.radius * 4;
+    if (goalFieldType === 'potential') {
+      const dx = position.x - goal.x;
+      const dy = position.y - goal.y;
+      const distToGoal = Math.sqrt(dx * dx + dy * dy);
       
-      // Only apply repulsive force if within influence distance
-      if (rho <= rho_0) {
-        // Calculate repulsive force magnitude
-        const magnitude = obstacleWeight * (1/rho - 1/rho_0) / (rho * rho);
-        
-        // Add repulsive force to total
-        totalForce.x += magnitude * dx / distToCenter;
-        totalForce.y += magnitude * dy / distToCenter;
+      // Attractive force - linear for better behavior at long distances
+      totalForce.x = -goalWeight * dx / Math.max(distToGoal, 0.1);
+      totalForce.y = -goalWeight * dy / Math.max(distToGoal, 0.1);
+    } else if (goalFieldType === 'magnetic') {
+      // Calculate magnetic dipole field
+      const dx = position.x - goal.x;
+      const dy = position.y - goal.y;
+      const distToGoal = Math.sqrt(dx * dx + dy * dy);
+      
+      // Define effective radius for magnetic field (3 times the wheelbase)
+      const effectiveRadius = 3 * CAR_WHEELBASE;
+      
+      // Skip if too close to avoid singularity
+      if (distToGoal > 0.1) {
+        if (distToGoal <= effectiveRadius) {
+          // Inside effective radius: Use magnetic field
+          // Unit vector in dipole direction
+          const dipoleX = Math.cos(goal.angle);
+          const dipoleY = Math.sin(goal.angle);
+          
+          // Dot product of r with dipole direction
+          const rDotM = (dx * dipoleX + dy * dipoleY) / distToGoal;
+          
+          // Calculate field strength with quadratic falloff
+          const fieldStrength = 50 * goalWeight / Math.pow(distToGoal, 2);
+          
+          // Calculate magnetic field components
+          // B = (3(m·r̂)r̂ - m)/r³, but scaled for better visualization
+          totalForce.x = fieldStrength * (3 * rDotM * dx/distToGoal - dipoleX);
+          totalForce.y = fieldStrength * (3 * rDotM * dy/distToGoal - dipoleY);
+        } else {
+          // Outside effective radius: Use potential field
+          // Attractive force - linear for better behavior at long distances
+          totalForce.x = -goalWeight * dx / distToGoal;
+          totalForce.y = -goalWeight * dy / distToGoal;
+        }
       }
-    });
+    }
+    
+    // Calculate forces from all obstacles
+    if (obstacleFieldType === 'potential' || obstacleFieldType === 'magnetic') {
+      obstacles.forEach(obstacle => {
+        const dx = position.x - obstacle.x;
+        const dy = position.y - obstacle.y;
+        const distToCenter = Math.sqrt(dx * dx + dy * dy);
+        const rho = Math.max(0.1, distToCenter - obstacle.radius); // Distance to surface
+        
+        if (obstacleFieldType === 'potential') {
+          const rho_0 = obstacle.radius * 4;
+          
+          // Only apply repulsive force if within influence distance
+          if (rho <= rho_0) {
+            // Calculate repulsive force magnitude
+            const magnitude = obstacleWeight * (1/rho - 1/rho_0) / (rho * rho);
+            
+            // Add repulsive force to total
+            totalForce.x += magnitude * dx / distToCenter;
+            totalForce.y += magnitude * dy / distToCenter;
+          }
+        } else if (obstacleFieldType === 'magnetic') {
+          // Calculate effective radius (2 times the car wheelbase plus obstacle radius)
+          const effectiveRadius = 2 * CAR_WHEELBASE + obstacle.radius;
+          
+          // Only apply magnetic field within effective radius
+          if (distToCenter <= effectiveRadius) {
+            // Scale the magnetic field strength based on the obstacle weight and distance
+            // Use a similar scaling as the potential field but with 1/r falloff
+            const baseStrength = obstacleWeight / 1000; // Scale down the large obstacle weight
+            const distanceScale = Math.max(distToCenter, obstacle.radius) / effectiveRadius;
+            const magneticFieldStrength = baseStrength * (1 - distanceScale);
+            
+            // Rotate the radial vector 90 degrees counterclockwise to get magnetic field direction
+            // This creates a counterclockwise rotation around the obstacle
+            totalForce.x += magneticFieldStrength * (-dy / distToCenter);
+            totalForce.y += magneticFieldStrength * (dx / distToCenter);
+          }
+        }
+      });
+    }
     
     return totalForce;
-  }, [obstacles, goal, goalWeight, obstacleWeight]);
+  }, [obstacles, goal, goalWeight, obstacleWeight, goalFieldType, obstacleFieldType]);
 
   const drawPotentialField = useCallback((ctx: CanvasRenderingContext2D) => {
-    if (!showField) return;
+    if (!calcField || !showField || (goalFieldType === 'off' && obstacleFieldType === 'off')) return;
 
     const dpr = window.devicePixelRatio || 1;
     const canvas = ctx.canvas;
@@ -491,26 +558,9 @@ function App() {
         
         // Set arrow color based on magnitude
         const alpha = 0.8;
-        
-        if (showFieldMagnitude) {
-          const color = mode === 'dark' ? '147, 197, 253' : '59, 130, 246';
-          ctx.fillStyle = `rgba(${color}, ${alpha})`;
-          ctx.strokeStyle = ctx.fillStyle;
-        } else {
-          const absX = Math.abs(force.x);
-          const absY = Math.abs(force.y);
-          const total = absX + absY;
-          if (mode === 'dark') {
-            const r = Math.floor(252 * (absY / total));
-            const b = Math.floor(252 * (absX / total));
-            ctx.fillStyle = `rgba(${r}, 165, ${b}, ${alpha})`;
-          } else {
-            const r = Math.floor(220 * (absY / total));
-            const b = Math.floor(220 * (absX / total));
-            ctx.fillStyle = `rgba(${r}, 40, ${b}, ${alpha})`;
-          }
-          ctx.strokeStyle = ctx.fillStyle;
-        }
+        const color = mode === 'dark' ? '147, 197, 253' : '59, 130, 246';
+        ctx.fillStyle = `rgba(${color}, ${alpha})`;
+        ctx.strokeStyle = ctx.fillStyle;
         
         // Draw arrow line with fixed thickness
         ctx.beginPath();
@@ -533,7 +583,7 @@ function App() {
         ctx.restore();
       }
     }
-  }, [calculatePotentialField, showField, pathParams.gridSize, obstacles, obstacleWeight, arrowScale, arrowThickness, arrowheadSize, showFieldMagnitude, mode]);
+  }, [calculatePotentialField, calcField, showField, pathParams.gridSize, arrowScale, arrowThickness, arrowheadSize, mode, goalFieldType, obstacleFieldType]);
 
   const drawPaths = useCallback((ctx: CanvasRenderingContext2D) => {
     if (!showPaths) return;
@@ -564,6 +614,13 @@ function App() {
   }, [paths, showPaths, mode]);
 
   const calculatePaths = useCallback(async () => {
+    // If both fields are disabled, don't calculate paths
+    if (goalFieldType === 'off' && obstacleFieldType === 'off') {
+      setPaths([]);
+      setShowPaths(false);
+      return;
+    }
+
     setIsCalculatingPaths(true);
     const newPaths: SimulationPath[] = [];
     const {
@@ -709,13 +766,31 @@ function App() {
 
   // Update the auto-update paths effect
   useEffect(() => {
+    if (goalFieldType === 'off' && obstacleFieldType === 'off') {
+      setPaths([]);
+      setShowPaths(false);
+      return;
+    }
+
     if (autoUpdatePaths && !isRunning && !isCalculatingPaths) {
       calculatePaths();
     }
-  }, [autoUpdatePaths, calculatePaths, goal, carRef.current.x, carRef.current.y, isRunning, isCalculatingPaths]);
+  }, [autoUpdatePaths, calculatePaths, goal, carRef.current.x, carRef.current.y, isRunning, isCalculatingPaths, goalFieldType, obstacleFieldType]);
 
-  // Add the calculateSinglePath function before the draw function
+  // Effect to handle showField state when calcField changes
+  useEffect(() => {
+    if (!calcField) {
+      setShowField(false);
+    }
+  }, [calcField]);
+
+  // Update the calculateSinglePath function
   const calculateSinglePath = useCallback((startX: number, startY: number, startAngle: number): PathPoint[] => {
+    // If both fields are disabled, return empty path
+    if (goalFieldType === 'off' && obstacleFieldType === 'off') {
+      return [];
+    }
+
     const path: PathPoint[] = [];
     let x = startX;
     let y = startY;
@@ -971,7 +1046,7 @@ function App() {
       ctx.stroke();
       ctx.restore();
     }
-  }, [obstacles, goal, hasReachedGoal, selectedObject, drawArrow, drawPotentialField, drawPaths, showCarPath, calculateSinglePath, mode, paintMode, cursorPreview, worldInit.brushSize, isDrawingObstacle]);
+  }, [obstacles, goal, hasReachedGoal, selectedObject, drawArrow, drawPotentialField, drawPaths, showCarPath, calculateSinglePath, mode, paintMode, cursorPreview, worldInit.brushSize, isDrawingObstacle, calcField, showField]);
 
   const handleMouseDown = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
     const coords = getCanvasCoordinates(e);
@@ -1656,7 +1731,6 @@ function App() {
                           value={pathParams.gridSize}
                           onChange={(_, value) => {
                             setPathParams(prev => ({ ...prev, gridSize: value as number }));
-                            // TODO: Update field resolution to match
                           }}
                           min={15}
                           max={100}
@@ -1668,25 +1742,29 @@ function App() {
 
                       <FormControlLabel
                         control={
-                          <Checkbox
-                            checked={showField}
-                            onChange={(e) => setShowField(e.target.checked)}
-                            size="small"
+                          <Switch
+                            checked={calcField}
+                            onChange={(e) => {
+                              setCalcField(e.target.checked);
+                              if (e.target.checked) {
+                                setShowField(true);
+                              }
+                            }}
+                            disabled={goalFieldType === 'off' && obstacleFieldType === 'off'}
                           />
                         }
-                        label={<Typography variant="body2">Show Potential Field</Typography>}
+                        label={<Typography variant="body2">Calculate Field</Typography>}
                       />
 
                       <FormControlLabel
                         control={
-                          <Checkbox
-                            checked={showFieldMagnitude}
-                            onChange={(e) => setShowFieldMagnitude(e.target.checked)}
-                            size="small"
-                            disabled={!showField}
+                          <Switch
+                            checked={showField}
+                            onChange={(e) => setShowField(e.target.checked)}
+                            disabled={!calcField}
                           />
                         }
-                        label={<Typography variant="body2">Show Field Magnitude</Typography>}
+                        label={<Typography variant="body2">Show Field</Typography>}
                       />
 
                       <Box>
@@ -1699,7 +1777,7 @@ function App() {
                           step={0.1}
                           valueLabelDisplay="auto"
                           size="small"
-                          disabled={!showField}
+                          disabled={!calcField}
                         />
                       </Box>
 
@@ -1713,7 +1791,7 @@ function App() {
                           step={0.5}
                           valueLabelDisplay="auto"
                           size="small"
-                          disabled={!showField}
+                          disabled={!calcField}
                         />
                       </Box>
 
@@ -1727,7 +1805,7 @@ function App() {
                           step={0.1}
                           valueLabelDisplay="auto"
                           size="small"
-                          disabled={!showField}
+                          disabled={!calcField}
                         />
                       </Box>
                     </Stack>
@@ -1744,6 +1822,41 @@ function App() {
                   </AccordionSummary>
                   <AccordionDetails>
                     <Stack spacing={2}>
+                      <Stack direction="row" spacing={1}>
+                        <FormControl fullWidth size="small">
+                          <InputLabel>Goal Field</InputLabel>
+                          <Select
+                            value={goalFieldType}
+                            label="Goal Field"
+                            onChange={(e) => {
+                              const newType = e.target.value as FieldType;
+                              setGoalFieldType(newType);
+                              // Force position+direction mode for magnetic field
+                              if (newType === 'magnetic') {
+                                setGoalType('direction');
+                              }
+                            }}
+                          >
+                            <MenuItem value="off">Off</MenuItem>
+                            <MenuItem value="potential">Potential</MenuItem>
+                            <MenuItem value="magnetic">Magnetic</MenuItem>
+                          </Select>
+                        </FormControl>
+                        <FormControl fullWidth size="small">
+                          <InputLabel>Obstacle Field</InputLabel>
+                          <Select
+                            value={obstacleFieldType}
+                            label="Obstacle Field"
+                            onChange={(e) => setObstacleFieldType(e.target.value as FieldType)}
+                            disabled={obstacles.length === 0}
+                          >
+                            <MenuItem value="off">Off</MenuItem>
+                            <MenuItem value="potential">Potential</MenuItem>
+                            <MenuItem value="magnetic">Magnetic</MenuItem>
+                          </Select>
+                        </FormControl>
+                      </Stack>
+
                       <Box>
                         <Typography variant="body2" gutterBottom>Goal Attraction</Typography>
                         <Slider
@@ -1754,6 +1867,7 @@ function App() {
                           step={0.1}
                           valueLabelDisplay="auto"
                           size="small"
+                          disabled={goalFieldType === 'off'}
                         />
                       </Box>
 
@@ -1767,6 +1881,7 @@ function App() {
                           step={100}
                           valueLabelDisplay="auto"
                           size="small"
+                          disabled={obstacleFieldType === 'off'}
                         />
                       </Box>
                     </Stack>
@@ -1883,12 +1998,14 @@ function App() {
                           <MuiFormControlLabel 
                             value="position" 
                             control={<Radio size="small" />} 
-                            label={<Typography variant="body2">Position Only</Typography>} 
+                            label={<Typography variant="body2">Position Only</Typography>}
+                            disabled={goalFieldType === 'magnetic'}
                           />
                           <MuiFormControlLabel 
                             value="direction" 
                             control={<Radio size="small" />} 
-                            label={<Typography variant="body2">Position + Direction</Typography>} 
+                            label={<Typography variant="body2">Position + Direction</Typography>}
+                            disabled={goalFieldType === 'magnetic'} 
                           />
                         </RadioGroup>
                       </FormControl>
